@@ -1,0 +1,20 @@
+[project]
+name = "req2code"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Lucas Reisener",email = "lucasreisener@gmail.com"}
+]
+readme = "README.md"
+requires-python = "^3.11"
+dependencies = [
+    "langchain-chroma (>=0.2.0,<0.3.0)",
+    "langchain-ollama (>=0.2.2,<0.3.0)",
+    "langchain-openai (>=0.3.1,<0.4.0)",
+    "tree-sitter (>=0.24.0,<0.25.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
