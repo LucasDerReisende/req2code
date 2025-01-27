@@ -1,12 +1,16 @@
 import mimetypes
 import os
+import re
 import sqlite3
 from os import mkdir
+import time
 
 import ollama
 from dotenv import dotenv_values
 from langchain_ollama import OllamaEmbeddings
-from openai import OpenAI
+from openai import OpenAI, RateLimitError as OpenAIRateLimitError
+
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 
 def is_binary_file(filename):
@@ -131,6 +135,43 @@ def load_call_analysis_results(repo_dir):
 
     return result
 
+def store_summaries(files, directory):
+    store_dir = get_store_dir_from_repository(directory)
+    conn = sqlite3.connect(f"{store_dir}/summaries.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file TEXT UNIQUE NOT NULL,
+        content TEXT NOT NULL,
+        summary TEXT NOT NULL
+    )
+    """)
+
+    conn.commit()
+    
+    for result in files:
+        try:
+            cursor.execute(
+                "INSERT OR IGNORE INTO summaries (file, content, summary) VALUES (?, ?, ?)",
+                (result["file"], result["content"], result["summary"])
+            )
+        except sqlite3.Error as e:
+            print(f"Error inserting {result['file']}: {e}")
+
+    conn.commit()
+
+def load_summaries(directory):
+    store_dir = get_store_dir_from_repository(directory)
+    conn = sqlite3.connect(f"{store_dir}/summaries.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT file, content, summary FROM summaries")
+    
+    summaries = cursor.fetchall()
+    
+    return [{"file": file, "content": content, "summary": summary} for file, content, summary in summaries]
 
 def get_openai_client():
     client = OpenAI(
@@ -142,6 +183,21 @@ def get_openai_client():
 def get_llm_query_result(query):
     return get_openai_query_result(query)
 
+
+def openai_rate_limit_handler(retry_state):
+    exception = retry_state.outcome.exception()
+    match = re.search(r"Please try again in ([\d.]+)s", str(exception.message))
+    if match:
+        wait_time = float(match.group(1))
+        print(f"Rate limit hit. Retrying in {wait_time:.2f} seconds.")
+        time.sleep(wait_time + 0.2)
+    
+# Retry logic for API calls, independent per thread
+@retry(
+    retry=retry_if_exception_type(OpenAIRateLimitError),  # Retry only on RateLimitError
+    stop=stop_after_attempt(5),  # Retry up to 5 times
+    before_sleep=openai_rate_limit_handler
+)
 def get_openai_query_result(query):
     client = get_openai_client()
     response = client.chat.completions.create(
@@ -174,8 +230,12 @@ def get_ollama_embeddings():
     embeddings = OllamaEmbeddings(model=get_local_model())
     return embeddings
 
+def get_store_dir_from_project(project):
+    store_dir = os.path.join("./data", project)
+    return store_dir
+
 def get_store_dir_from_repository(repository_path):
-    store_dir = f"{repository_path}/stores"
-    if not os.path.exists(store_dir):
-        mkdir(store_dir)
+    store_dir = os.path.join("./data", os.path.split(repository_path)[1])
+    os.makedirs(store_dir, exist_ok=True)
+    
     return store_dir

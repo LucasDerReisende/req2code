@@ -98,7 +98,7 @@ def analyze_directory(directory):
     result = []
     for path in file_paths:
         result.append({
-            "file": path,
+            "file": os.path.relpath(path, directory),
             "calls": list(file_imports[path]),
             "called_by": list(file_imported_by[path])
         })
