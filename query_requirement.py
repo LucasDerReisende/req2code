@@ -64,8 +64,19 @@ def get_relevant_files(requirement, file_list, directory):
 
 def query_stats(directory, args):
     store_dir = get_store_dir_from_project(args.project)
-    # size of store_dir
-    print('disk size of databases:', os.path.getsize(store_dir))
+
+    def get_size():
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(store_dir):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                # skip if it is symbolic link
+                if not os.path.islink(fp):
+                    total_size += os.path.getsize(fp)
+
+        return total_size
+
+    print(f'disk size of databases: {get_size() / 1024 / 1024:.2f} MB')
     # ..to be continued
 
 def query_project(directory, args):

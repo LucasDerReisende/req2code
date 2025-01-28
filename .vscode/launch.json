@@ -56,8 +56,7 @@
             "args": [
               "newsscraper",
               "retrieve",
-              "--query",
-              "süddeutsche"
+              "--stats",
             ],
         },
     ]

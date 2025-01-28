@@ -161,6 +161,10 @@ def initialize_content_vector_db(file_list, directory):
     return vector_store_contents
 
 def init_project(directory, analyze_fn, args):
+    if not any([args.analyse, args.summarize, args.vectorize_content, args.vectorize_summaries]):
+        print("choose at least one of the following options: --analyse, --summarize, --vectorize-content, --vectorize-summaries")
+        return
+    
     if args.analyse:
         print("Analyzing directory...")
         import_graph = analyze_fn(directory)
