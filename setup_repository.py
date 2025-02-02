@@ -1,13 +1,15 @@
+import argparse
 import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from langchain_core.documents import Document
 from tqdm import tqdm
-from analyzer_js import analyze_directory
+from analyzer_js import analyze_directory as analyze_js_directory
+from analyzer_py import analyze_directory as analyze_py_directory
 from langchain_chroma import Chroma
-from utils import get_llm_query_result, get_ollama_embeddings, get_store_dir_from_repository, \
-    store_call_analysis_results, is_binary_file
+from utils import get_llm_query_result, get_ollama_embeddings, get_store_dir_from_repository, load_call_analysis_results, load_summaries, \
+    store_call_analysis_results, is_binary_file, store_summaries
 
 SUMMARY_SYSTEM_PROMPT = \
     """
@@ -50,7 +52,7 @@ SUMMARY_TEMPLATE = \
     """
 
 
-def generate_single_file_summary(file):
+def generate_single_file_summary(directory, file):
     result = {
         "file": file['file'],
         "content": "",
@@ -59,16 +61,19 @@ def generate_single_file_summary(file):
         "called_by": file['called_by']
     }
 
-    with open(file['file'], "r") as f:
+    file_path = os.path.join(directory, file['file'])
+    with open(file_path, "r") as f:
         try:
-            if is_binary_file(file['file']):
+            if is_binary_file(file_path):
                 return result
+            
             result['content'] = f.read()
             if len(result['content']) > 100000:
                 chunks = split_into_chunks(result['content'], 100000, 1000)
-                chunked_summaries = [get_llm_query_result(
-                    SUMMARY_SYSTEM_PROMPT_CHUNKED.format(file_name=file['file'], file_content=chunk)) for chunk in
-                    chunks]
+                chunked_summaries = [
+                    get_llm_query_result(SUMMARY_SYSTEM_PROMPT_CHUNKED.format(file_name=file['file'], file_content=chunk)) 
+                    for chunk in chunks
+                ]
                 result['summary'] = get_llm_query_result(
                     SUMMARY_SYSTEM_PROMPT_COMBINE.format(file_name=file['file'], file_content=chunked_summaries))
             else:
@@ -91,51 +96,29 @@ def split_into_chunks(text, chunk_size, overlap):
 
 
 def add_file_contents(file_list, directory):
-    store_dir = get_store_dir_from_repository(directory)
-    conn = sqlite3.connect(f"{store_dir}/summaries.db")
-    cursor = conn.cursor()
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS summaries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        file TEXT UNIQUE NOT NULL,
-        summary TEXT NOT NULL
-    )
-    """)
-
-    conn.commit()
-
     results = []
     with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_file = {executor.submit(generate_single_file_summary, file): file for file in file_list}
+        future_to_file = {executor.submit(generate_single_file_summary, directory, file): file for file in file_list}
         for future in tqdm(as_completed(future_to_file), total=len(file_list)):
             try:
                 results.append(future.result())
             except Exception as e:
                 print(f"Error processing file: {e}")
 
-    for result in results:
-        try:
-            cursor.execute(
-                "INSERT OR IGNORE INTO summaries (file, summary) VALUES (?, ?)",
-                (result["file"], result["summary"])
-            )
-        except sqlite3.Error as e:
-            print(f"Error inserting {result['file']}: {e}")
-
-    conn.commit()
+    store_summaries(results, directory)
     return results
 
-
-def initialize_vector_dbs(file_list, directory):
+def initialize_summary_vector_db(file_list, directory):
+    store_dir = get_store_dir_from_repository(directory)
+    
     embeddings = get_ollama_embeddings()
     CHUNK_SIZE = 10
 
-    store_dir = get_store_dir_from_repository(directory)
-
+    # Initialize the summary vector store
     persist_summary_store_dir = f"{store_dir}/summary_store"
     vector_store_summaries = Chroma(embedding_function=embeddings, persist_directory=persist_summary_store_dir)
 
+    # Prepare summary documents for vectorization
     summary_documents = []
     for file in file_list:
         if file['summary'] == '':
@@ -143,13 +126,24 @@ def initialize_vector_dbs(file_list, directory):
         document = Document(page_content=file['summary'], metadata={"file": file['file']})
         summary_documents.append(document)
 
+    # Chunk the summary documents and add them to the vector store
     summary_chunks = [summary_documents[i:i + CHUNK_SIZE] for i in range(0, len(summary_documents), CHUNK_SIZE)]
     for chunk in tqdm(summary_chunks):
         vector_store_summaries.add_documents(chunk)
+    
+    return vector_store_summaries
+    
+def initialize_content_vector_db(file_list, directory):
+    store_dir = get_store_dir_from_repository(directory)
 
+    embeddings = get_ollama_embeddings()
+    CHUNK_SIZE = 10
+    
+    # Initialize the content vector store
     persist_contents_store_dir = f"{store_dir}/contents_store"
     vector_store_contents = Chroma(embedding_function=embeddings, persist_directory=persist_contents_store_dir)
 
+    # Prepare content documents for vectorization
     content_documents = []
     for file in file_list:
         if file['content'] == '':
@@ -158,35 +152,43 @@ def initialize_vector_dbs(file_list, directory):
                             metadata={"file": file['file']})
         content_documents.append(document)
 
+    # Chunk the content documents and add them to the vector store
     content_chunks = [content_documents[i:i + CHUNK_SIZE] for i in range(0, len(content_documents), CHUNK_SIZE)]
     for chunk in tqdm(content_chunks):
         vector_store_contents.add_documents(chunk)
 
-    return vector_store_summaries, vector_store_contents
+    # Return the initialized vector stores
+    return vector_store_contents
 
-
-def main():
-    directory = "/Users/lucas/Downloads/crawlee-python-master"
-    directory = "/Users/lucas/Downloads/jitsi-meet-master/react/features/analytics"
-    directory = "/Users/lucas/Downloads/jitsi-meet-master/react/features/base/media/components"
-
-    if not os.path.isdir(directory):
-        print("Invalid directory path.")
+def init_project(directory, analyze_fn, args):
+    if not any([args.analyse, args.summarize, args.vectorize_content, args.vectorize_summaries]):
+        print("choose at least one of the following options: --analyse, --summarize, --vectorize-content, --vectorize-summaries")
         return
-
-    print("Analyzing directory...")
-    file_list = analyze_directory(directory)
-    print("Analyzing directory done.")
-    print("Storing analysis results...")
-    store_call_analysis_results(directory, file_list)
-    print("Storing analysis results done.")
-    print("Adding file contents and generating summaries...")
-    file_list = add_file_contents(file_list, directory)
-    print("Adding file contents and generating summaries done.")
-    print("Initializing vector databases...")
-    initialize_vector_dbs(file_list, directory)
-    print("Initializing vector databases done.")
-
-
-if __name__ == "__main__":
-    main()
+    
+    if args.analyse:
+        print("Analyzing directory...")
+        import_graph = analyze_fn(directory)
+        print("Analyzing directory done.")
+        print("Storing analysis results...")
+        store_call_analysis_results(directory, import_graph)
+        print("Storing analysis results done.")
+    
+    if args.summarize:
+        file_list = load_call_analysis_results(directory)
+        print("Adding file contents and generating summaries...")
+        file_list = add_file_contents(file_list, directory)
+        print("Adding file contents and generating summaries done.")
+    
+    if args.vectorize_content or args.vectorize_summaries:
+        analysis_results = {descr['file']: descr for descr in load_call_analysis_results(directory)}
+        summary_results = {descr['file']: descr for descr in load_summaries(directory)}
+        file_list = [{**analysis_results[id], **summary} for id, summary in summary_results.items()]
+        
+    if args.vectorize_summaries:
+        print("Initializing summary database...")
+        initialize_summary_vector_db(file_list, directory)
+        print("Initializing summary database done.")
+    if args.vectorize_content:
+        print("Initializing vector databases...")
+        initialize_content_vector_db(file_list, directory)
+        print("Initializing vector databases done.")

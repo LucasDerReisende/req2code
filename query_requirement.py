@@ -1,14 +1,15 @@
+import json
 import sqlite3
-
+import os
 from langchain_chroma import Chroma
 
-from utils import get_ollama_embeddings, get_store_dir_from_repository, get_llm_query_result, load_call_analysis_results
+from utils import get_ollama_embeddings, get_store_dir_from_project, get_store_dir_from_repository, get_llm_query_result, load_call_analysis_results
 
 from analyzer_py import analyze_directory
 
-def similar_files_vector_db(requirement, directory):
+def similar_files_vector_db(query, project):
     embeddings = get_ollama_embeddings()
-    store_dir = get_store_dir_from_repository(directory)
+    store_dir = get_store_dir_from_project(project)
 
     persist_summary_store_dir = f"{store_dir}/summary_store"
     vector_store_summaries = Chroma(embedding_function=embeddings, persist_directory=persist_summary_store_dir)
@@ -16,8 +17,8 @@ def similar_files_vector_db(requirement, directory):
     persist_contents_store_dir = f"{store_dir}/contents_store"
     vector_store_contents = Chroma(embedding_function=embeddings, persist_directory=persist_contents_store_dir)
 
-    similar_documents_summaries = vector_store_summaries.similarity_search(requirement, k=10)
-    similar_documents_contents = vector_store_contents.similarity_search(requirement, k=5)
+    similar_documents_summaries = vector_store_summaries.similarity_search(query, k=10)
+    similar_documents_contents = vector_store_contents.similarity_search(query, k=5)
 
     similar_files_summaries = [document.metadata["file"] for document in similar_documents_summaries]
     similar_files_contents = [document.metadata["file"] for document in similar_documents_contents]
@@ -49,7 +50,7 @@ def get_relevant_files(requirement, file_list, directory):
         cursor.execute("SELECT summary FROM summaries WHERE file=?", (file,))
         # summary = cursor.fetchone()
 
-        with open(file, 'r') as f:
+        with open(os.path.join(directory, file), 'r') as f:
             content = f.read()
 
         files.append(f"{file}: {content}")
@@ -61,24 +62,27 @@ def get_relevant_files(requirement, file_list, directory):
     query = TEMPLATE.format(requirement=requirement, files="\n".join(files))
     return get_llm_query_result(query)
 
-def main():
-    directory = "/Users/lucas/Downloads/crawlee-python-master"
-    directory = "/Users/lucas/Downloads/jitsi-meet-master/react/features/base/media/components"
+def query_stats(directory, args):
+    store_dir = get_store_dir_from_project(args.project)
 
+    def get_size():
+        total_size = 0
+        for dirpath, dirnames, filenames in os.walk(store_dir):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                # skip if it is symbolic link
+                if not os.path.islink(fp):
+                    total_size += os.path.getsize(fp)
 
-    requirement = """
-    It would be handy to have the ability to select multiple items in the filter inputs for events. I have a camera that generates pretty constant events, so when I visit events it is pages of "bird bird bird bird" as my wife likes to see what her chickens were up to during the day. All other categories are interesting to me, but it's pages of scrolling to get to it unless I select a different label, but then I have to look at labels one at a time.
-    The ability to select all and then deselect one or more labels -- or simply select multiple labels individually -- would be a nice to have!
-    """
-    requirement = "Bumps vite from 2.8.6 to 2.9.13."
-    requirement = "Refactor events to be more generic"
-    requirement = "Configuration of the camera"
-    requirement = "Refactor the session"
-    requirement = "Refactor all related to Audio"
+        return total_size
 
+    print(f'disk size of databases: {get_size() / 1024 / 1024:.2f} MB')
+    # ..to be continued
+
+def query_project(directory, args):
     # find similar files
     print('Finding similar files...')
-    similar_files = set(similar_files_vector_db(requirement, directory))
+    similar_files = set(similar_files_vector_db(args.query, args.project))
     print('Finding similar files done')
 
     # find and add adjacent files
@@ -94,12 +98,13 @@ def main():
 
     # get relevant files
     print('Getting relevant files...')
-    relevant_files = get_relevant_files(requirement, list(similar_files), directory)
+    relevant_files = get_relevant_files(args.query, list(similar_files), directory)
     print('Getting relevant files done')
 
     print('Relevant files:', relevant_files)
-
-
-
-if __name__== "__main__":
-    main()
+    
+    try:
+        result = json.loads(relevant_files.replace('```json\n', '').replace('```', ''))
+        print('Relevant files:', result)
+    except Exception as e:
+        print(f"Error parsing relevant files: {e}")

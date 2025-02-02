@@ -14,3 +14,22 @@ If you want to use OpenAI for querying, make sure to store your OPENAI_API key i
 Also make sure to adapt `get_llm_query_result` to your needs (whether you want to query locally or using OPENAI).
 
 
+## Usage of command line tool
+
+### Setup
+To create the data for project setup run the script with the `init` command.
+
+projects and their according directory have to be specified in `main.py.`
+
+`poetry run python main.py /project/ init`
+
+with arguments 
+
+`--analyse --summarize --vectorize-summaries --vectorize-content`.
+
+### Retrieve
+To query the RAG use the `retrieve` command.
+
+`retrieve --query "question?"` will query the RAG for files it associates with the question.
+
+`retrieve --stats` will print stats about the data for the specified project.
