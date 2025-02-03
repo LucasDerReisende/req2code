@@ -161,7 +161,7 @@ def get_summary(query, similar_files, directory):
     **Summary**
     *Summary text for the changes to be performed*
     
-    **Step-by-step Breakdown**
+    **Step-by-Step Breakdown**
     *Step-by-step breakdown of the changes to be performed*
     *Structure the steps by components, so the user knows which need to be changed*
     *Example*
