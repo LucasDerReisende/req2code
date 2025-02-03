@@ -147,7 +147,6 @@ def find_missing_files(query, similar_files, directory):
     Generate a string that can be used to search a vector database for files that are missing.
     This vector database contains embeddings of summaries and contents of the files in the project.
     Return ONLY the string for the search.
-    Return a maximum of 15 files.
     
     Requirement:
     {requirement}
@@ -206,9 +205,10 @@ def query_project(directory, args):
         similar_files = similar_files.union(missing_files)
         print('Finding missing files done')
 
-    print('Filtering similar files...')
-    similar_files = filter_similar_files_by_summary(args.query, list(similar_files), directory)
-    print('Filtering similar files done')
+    if args.filter_files:
+        print('Filtering similar files...')
+        similar_files = filter_similar_files_by_summary(args.query, list(similar_files), directory)
+        print('Filtering similar files done')
 
     # get relevant files
     print('Getting relevant files...')

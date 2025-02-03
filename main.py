@@ -35,6 +35,7 @@ def main():
     query_options_group = query_parser.add_argument_group("Options for retrieval while querying")
     query_options_group.add_argument("--adjacent", action="store_true")
     query_options_group.add_argument("--find-missing", action="store_true")
+    query_options_group.add_argument("--filter-files", action="store_true")
 
     args = parser.parse_args()
     
