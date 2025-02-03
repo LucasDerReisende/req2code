@@ -173,6 +173,23 @@ def load_summaries(directory):
     
     return [{"file": file, "content": content, "summary": summary} for file, content, summary in summaries]
 
+def get_file_summaries_dict(directory, files):
+    store_dir = get_store_dir_from_repository(directory)
+    conn = sqlite3.connect(f"{store_dir}/summaries.db")
+    cursor = conn.cursor()
+
+    summaries = {}
+    for file in files:
+        cursor.execute("SELECT summary FROM summaries WHERE file=?", (file,))
+        summary = cursor.fetchone()
+        if summary:
+            summaries[file] = summary[0]
+
+    cursor.close()
+    conn.close()
+
+    return summaries
+
 def get_openai_client():
     client = OpenAI(
         api_key=dotenv_values(".env")["OPENAI_API_KEY"]

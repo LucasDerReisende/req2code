@@ -3,7 +3,9 @@ import sqlite3
 import os
 from langchain_chroma import Chroma
 
-from utils import get_embeddings, get_store_dir_from_repository, get_llm_query_result, load_call_analysis_results
+from utils import get_embeddings, get_store_dir_from_repository, get_llm_query_result, load_call_analysis_results, \
+    get_file_summaries_dict
+
 
 def similar_files_vector_db(query, directory):
     embeddings = get_embeddings()
@@ -107,6 +109,7 @@ def filter_similar_files_by_summary(query, similar_files, directory):
     You are given a requirement for a software project and a list of files that are similar to the requirement.
     For each file, you are given a summary of the file content.
     Please filter the list of files to remove files that do not have anything to do with the requirement.
+    Do not hallucinate file names!
     Return only a list of the relevant files in JSON format. [<"File 1 Name">, <"File 2 Name">, ... <"File N Name">]
        
     Requirement:
@@ -116,19 +119,7 @@ def filter_similar_files_by_summary(query, similar_files, directory):
     {files}
     """
 
-    store_dir = get_store_dir_from_repository(directory)
-    conn = sqlite3.connect(f"{store_dir}/summaries.db")
-    cursor = conn.cursor()
-
-    summaries = {}
-    for file in similar_files:
-        cursor.execute("SELECT summary FROM summaries WHERE file=?", (file,))
-        summary = cursor.fetchone()
-        if summary:
-            summaries[file] = summary[0]
-
-    cursor.close()
-    conn.close()
+    summaries = get_file_summaries_dict(directory, similar_files)
 
     query = TEMPLATE.format(requirement=query, files="\n\n".join([f"{file}:\n {summary}" for file, summary in summaries.items()]))
 
@@ -155,24 +146,56 @@ def find_missing_files(query, similar_files, directory):
     {files}
     """
 
-    store_dir = get_store_dir_from_repository(directory)
-    conn = sqlite3.connect(f"{store_dir}/summaries.db")
-    cursor = conn.cursor()
-
-    summaries = {}
-    for file in similar_files:
-        cursor.execute("SELECT summary FROM summaries WHERE file=?", (file,))
-        summary = cursor.fetchone()
-        if summary:
-            summaries[file] = summary[0]
-
-    cursor.close()
-    conn.close()
+    summaries = get_file_summaries_dict(directory, similar_files)
 
     search_string = get_llm_query_result(TEMPLATE.format(requirement=query, files="\n\n".join([f"{file}:\n {summary}" for file, summary in summaries.items()])))
 
     return similar_files_vector_db(search_string, directory)
 
+def get_summary(query, similar_files, directory):
+    TEMPLATE = """
+    You are given a requirement for a software project and a list of files with their summaries that are similar to the requirement.
+    A user needs to implement this requirement and through preprocessing we selected a list of files that could be relevant.
+    Please provide a summary in the following format to the user:
+    
+    **Summary**
+    *Summary text for the changes to be performed*
+    
+    **Step-by-step Breakdown**
+    *Step-by-step breakdown of the changes to be performed*
+    *Structure the steps by components, so the user knows which need to be changed*
+    *Example*
+    a. Image component
+     - Change the image source to the new image
+    b. Backend
+     - Add a new endpoint for the new feature
+    *End of example*
+    Do not give or generate code samples!
+    Do not hallucinate steps that are not related to the relevant files!
+    Be very concise in the steps!
+    Do not make up steps that are unrelated to the given files!
+    
+    **Files to be changed**
+    *List of files that need to be changed in a markdown list*
+    *Do not give additional files that are not related to the requirement or hallucinate files*
+    *Only write file names that were given before*
+    
+    **Estimation**
+    *Estimation of the time needed to implement the changes*
+    *First write a one sentence summary of the estimation*
+    *Then write: Estimation: X hours*
+    
+    Requirement:
+    {requirement}
+    
+    Similar files:
+    {files}
+    """
+
+    summaries = get_file_summaries_dict(directory, similar_files)
+
+    query = TEMPLATE.format(requirement=query, files="\n\n".join([f"{file}:\n {summary}" for file, summary in summaries.items()]))
+    return get_llm_query_result(query)
 
 
 def query_project(directory, args):
@@ -222,3 +245,8 @@ def query_project(directory, args):
         print('Relevant files:', result)
     except Exception as e:
         print(f"Error parsing relevant files: {e}")
+        return
+
+    print('Generating summary...')
+    summary = get_summary(args.query, result, directory)
+    print('Summary:\n', summary)
