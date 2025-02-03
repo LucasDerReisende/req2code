@@ -12,6 +12,22 @@ from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 
 from tenacity import retry, stop_after_attempt, retry_if_exception_type
 
+total_input_tokes = 0
+total_output_tokes = 0
+
+def get_input_tokens():
+    return total_input_tokes
+
+def get_output_tokens():
+    return total_output_tokes
+
+def set_input_tokens(value):
+    global total_input_tokes
+    total_input_tokes = value
+
+def set_output_tokens(value):
+    global total_output_tokes
+    total_output_tokes = value
 
 def is_binary_file(filename):
     """
@@ -243,6 +259,9 @@ def get_openai_query_result(query):
             }
         ]
     )
+    set_input_tokens(get_input_tokens() + response.usage.prompt_tokens)
+    set_output_tokens(get_output_tokens() + response.usage.completion_tokens)
+
     return response.choices[0].message.content
 
 @retry(
@@ -300,3 +319,12 @@ def get_store_dir_from_repository(repository_path):
     os.makedirs(store_dir, exist_ok=True)
     
     return store_dir
+
+def print_runtime(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"Runtime: {end_time - start_time:.2f} seconds")
+        return result
+    return wrapper

@@ -1,12 +1,16 @@
 import argparse
 import os
 
+from memory_profiler import memory_usage
+
 from analyzer_js import analyze_directory as analyze_js_directory
 from analyzer_py import analyze_directory as analyze_py_directory
 from query_requirement import query_project, query_stats
 from setup_repository import init_project
+from utils import print_runtime, get_input_tokens, get_output_tokens
 
 
+@print_runtime
 def main():
     projects = {
         "crawlee_python_master": ("/Users/lucas/Downloads/crawlee-python-master", analyze_py_directory),
@@ -66,6 +70,13 @@ def main():
             query_project(directory, args)
         if args.stats:
             query_stats(directory, args)
-        
+
+    COST_PER_INPUT_TOKEN = 0.00000015
+    COST_PER_OUTPUT_TOKEN = 0.0000006
+    print(f"Input tokens: {get_input_tokens()}")
+    print(f"Input tokens: {get_output_tokens()}")
+    print(f"Total API Cost (USD): {get_input_tokens() * COST_PER_INPUT_TOKEN + get_output_tokens() * COST_PER_OUTPUT_TOKEN}")
+
 if __name__ == "__main__":
-    main()
+    mem_usage = memory_usage(main, max_usage=True)
+    print(f"Maximum memory usage: {mem_usage:.2f} MB")
