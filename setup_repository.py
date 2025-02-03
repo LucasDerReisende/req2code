@@ -1,19 +1,16 @@
-import argparse
 import os
-import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from langchain_core.documents import Document
 from tqdm import tqdm
-from analyzer_js import analyze_directory as analyze_js_directory
-from analyzer_py import analyze_directory as analyze_py_directory
 from langchain_chroma import Chroma
-from utils import get_llm_query_result, get_ollama_embeddings, get_store_dir_from_repository, load_call_analysis_results, load_summaries, \
+from utils import get_llm_query_result, get_embeddings, get_store_dir_from_repository, load_call_analysis_results, load_summaries, \
     store_call_analysis_results, is_binary_file, store_summaries
 
 SUMMARY_SYSTEM_PROMPT = \
     """
-    You are an expert software engineer who has been asked to generate a summary of a Python code file.
+    You are an expert software engineer who has been asked to generate a summary of a code file.
+    The summary should not only contain information about the code, but also what it is used for, its purpose, including keywords at the end.
     Be as concise as possible and do not repeat yourself.
     
     The file is called: {file_name}
@@ -24,7 +21,8 @@ SUMMARY_SYSTEM_PROMPT = \
 
 SUMMARY_SYSTEM_PROMPT_CHUNKED = \
     """
-    You are an expert software engineer who has been asked to generate a summary of a Python code file.
+    You are an expert software engineer who has been asked to generate a summary of a code file.
+    The summary should not only contain information about the code, but also what it is used for, its purpose, including keywords at the end.
     Be as concise as possible and do not repeat yourself.
     
     The file is called: {file_name}
@@ -35,7 +33,8 @@ SUMMARY_SYSTEM_PROMPT_CHUNKED = \
 
 SUMMARY_SYSTEM_PROMPT_COMBINE = \
     """
-    You are an expert software engineer who has been asked to generate a summary of a Python code file.
+    You are an expert software engineer who has been asked to generate a summary of a code file.
+    The summary should not only contain information about the code, but also what it is used for, its purpose, including keywords at the end.
     Be as concise as possible and do not repeat yourself.
     
     The file is called: {file_name}
@@ -111,7 +110,7 @@ def add_file_contents(file_list, directory):
 def initialize_summary_vector_db(file_list, directory):
     store_dir = get_store_dir_from_repository(directory)
     
-    embeddings = get_ollama_embeddings()
+    embeddings = get_embeddings()
     CHUNK_SIZE = 10
 
     # Initialize the summary vector store
@@ -136,7 +135,7 @@ def initialize_summary_vector_db(file_list, directory):
 def initialize_content_vector_db(file_list, directory):
     store_dir = get_store_dir_from_repository(directory)
 
-    embeddings = get_ollama_embeddings()
+    embeddings = get_embeddings()
     CHUNK_SIZE = 10
     
     # Initialize the content vector store
@@ -185,10 +184,10 @@ def init_project(directory, analyze_fn, args):
         file_list = [{**analysis_results[id], **summary} for id, summary in summary_results.items()]
         
     if args.vectorize_summaries:
-        print("Initializing summary database...")
+        print("Initializing summary vector database...")
         initialize_summary_vector_db(file_list, directory)
-        print("Initializing summary database done.")
+        print("Initializing summary vector database done.")
     if args.vectorize_content:
-        print("Initializing vector databases...")
+        print("Initializing content vector database...")
         initialize_content_vector_db(file_list, directory)
-        print("Initializing vector databases done.")
+        print("Initializing content vector database done.")

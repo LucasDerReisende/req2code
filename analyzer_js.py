@@ -91,16 +91,20 @@ def analyze_directory(directory):
                     import_source = node['source']['value']
                     resolved_path = resolve_import_path(base_path, import_source, file_paths)
                     if resolved_path:
-                        file_imports[path].add(resolved_path)
-                        file_imported_by[resolved_path].add(path)
+                        resolved_path = os.path.relpath(resolve_import_path(base_path, import_source, file_paths),
+                                                        directory)
+                        relative_path = os.path.relpath(path, directory)
+                        file_imports[relative_path].add(resolved_path)
+                        file_imported_by[resolved_path].add(relative_path)
 
     # Create a structured list of file relationships
     result = []
     for path in file_paths:
+        relative_path = os.path.relpath(path, directory)
         result.append({
-            "file": os.path.relpath(path, directory),
-            "calls": list(file_imports[path]),
-            "called_by": list(file_imported_by[path])
+            "file": relative_path,
+            "calls": list(file_imports[relative_path]),
+            "called_by": list(file_imported_by[relative_path])
         })
 
     return result

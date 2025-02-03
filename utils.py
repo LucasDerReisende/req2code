@@ -2,15 +2,15 @@ import mimetypes
 import os
 import re
 import sqlite3
-from os import mkdir
 import time
 
 import ollama
 from dotenv import dotenv_values
 from langchain_ollama import OllamaEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, retry_if_exception_type
 
 
 def is_binary_file(filename):
@@ -177,7 +177,13 @@ def get_openai_client():
     client = OpenAI(
         api_key=dotenv_values(".env")["OPENAI_API_KEY"]
     )
+    return client
 
+def get_deepseek_client():
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=dotenv_values(".env")["DEEPSEEK_API_KEY"]
+    )
     return client
 
 def get_llm_query_result(query):
@@ -191,6 +197,17 @@ def openai_rate_limit_handler(retry_state):
         wait_time = float(match.group(1))
         print(f"Rate limit hit. Retrying in {wait_time:.2f} seconds.")
         time.sleep(wait_time + 0.2)
+
+class DeepSeekTimeout(Exception):
+    def __init__(self, message=0):
+        self.message = message
+        super().__init__(self.message)
+
+def deepseek_rate_limit_handler(retry_state):
+    exception = retry_state.outcome.exception()
+    wait_time = int(exception.message) / 1000.0 - time.time()
+    print(f"Rate limit hit. Retrying in {wait_time:.2f} seconds.")
+    time.sleep(wait_time + 0.2)
     
 # Retry logic for API calls, independent per thread
 @retry(
@@ -211,6 +228,27 @@ def get_openai_query_result(query):
     )
     return response.choices[0].message.content
 
+@retry(
+    retry=retry_if_exception_type(DeepSeekTimeout),  # Retry only on RateLimitError
+    stop=stop_after_attempt(5),  # Retry up to 5 times
+    before_sleep=deepseek_rate_limit_handler
+)
+def get_deepseek_query_result(query):
+    client = get_deepseek_client()
+    response = client.chat.completions.create(
+        model="deepseek/deepseek-r1:free",
+        messages=[
+            {
+                "role": "user",
+                "content": query,
+            }
+        ]
+    )
+    if response.model_extra.get('error').get('code') == 429:
+        raise DeepSeekTimeout(response.model_extra.get('error').get('metadata').get('headers').get('X-RateLimit-Reset'))
+    return response.choices[0].message.content
+
+
 def get_local_model():
     return "llama3.1:8B"
 
@@ -226,13 +264,19 @@ def get_local_llm_query_result(query):
     )
     return response["message"]["content"]
 
+def get_embeddings():
+    return get_openai_embeddings()
+
 def get_ollama_embeddings():
     embeddings = OllamaEmbeddings(model=get_local_model())
     return embeddings
 
-def get_store_dir_from_project(project):
-    store_dir = os.path.join("./data", project)
-    return store_dir
+def get_openai_embeddings():
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        openai_api_key=dotenv_values(".env")["OPENAI_API_KEY"]
+    )
+    return embeddings
 
 def get_store_dir_from_repository(repository_path):
     store_dir = os.path.join("./data", os.path.split(repository_path)[1])
