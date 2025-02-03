@@ -32,7 +32,7 @@ def main():
     query_group.add_argument("--query", help="The query string")
     query_group.add_argument("--stats", action="store_true", help="Show the stats of the project")
 
-    query_options_group = query_parser.add_argument_group("query options")
+    query_options_group = query_parser.add_argument_group("Options for retrieval while querying")
     query_options_group.add_argument("--adjacent", action="store_true")
     query_options_group.add_argument("--find-missing", action="store_true")
 
