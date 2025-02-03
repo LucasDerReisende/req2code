@@ -1,17 +1,10 @@
 import argparse
 import os
-import sqlite3
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from langchain_core.documents import Document
-from tqdm import tqdm
 from analyzer_js import analyze_directory as analyze_js_directory
 from analyzer_py import analyze_directory as analyze_py_directory
-from langchain_chroma import Chroma
 from query_requirement import query_project, query_stats
-from setup_repository import add_file_contents, init_project, initialize_content_vector_db, initialize_summary_vector_db
-from utils import get_llm_query_result, get_ollama_embeddings, get_store_dir_from_repository, load_call_analysis_results, load_summaries, \
-    store_call_analysis_results, is_binary_file, store_summaries
+from setup_repository import init_project
 
 
 def main():
@@ -19,6 +12,8 @@ def main():
         "crawlee_python_master": ("/Users/lucas/Downloads/crawlee-python-master", analyze_py_directory),
         "jitsi_analytics": ("/Users/lucas/Downloads/jitsi-meet-master/react/features/analytics", analyze_js_directory),
         "jitsi_media": ("/Users/lucas/Downloads/jitsi-meet-master/react/features/base/media/components", analyze_js_directory),
+        "jitsi": ("/Users/lucas/Downloads/jitsi-meet-master", analyze_js_directory),
+        "jitsi_react": ("/Users/lucas/Downloads/jitsi-meet-master/react", analyze_js_directory),
         "newsscraper": ("../../NewsPolitics/newsscraper", analyze_py_directory)
     }
     
@@ -35,8 +30,12 @@ def main():
     query_parser = subparsers.add_parser("retrieve", help="Query the database for similar files")
     query_group = query_parser.add_mutually_exclusive_group(required=True)
     query_group.add_argument("--query", help="The query string")
-    query_group.add_argument("--stats", action="store_true", help="Show the stats of the project")    
-    
+    query_group.add_argument("--stats", action="store_true", help="Show the stats of the project")
+
+    query_options_group = query_parser.add_argument_group("query options")
+    query_options_group.add_argument("--adjacent", action="store_true")
+    query_options_group.add_argument("--find-missing", action="store_true")
+
     args = parser.parse_args()
     
     (directory, analyze_fn) = projects[args.project]
