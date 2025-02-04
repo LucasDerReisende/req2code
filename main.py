@@ -19,7 +19,8 @@ def main():
         "crawlee_python_master": ("/Users/lucas/Downloads/crawlee-python-master", analyze_py_directory),
         "jitsi_analytics": ("/Users/lucas/Downloads/jitsi-meet-master/react/features/analytics", analyze_js_directory),
         "jitsi_media": ("/Users/lucas/Downloads/jitsi-meet-master/react/features/base/media/components", analyze_js_directory),
-        "newsscraper": ("../../NewsPolitics/newsscraper", analyze_py_directory)
+        "newsscraper": ("../../NewsPolitics/newsscraper", analyze_py_directory),
+        "cula": ("data/cula", None),
     }
     
     parser = argparse.ArgumentParser()

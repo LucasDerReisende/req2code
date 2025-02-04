@@ -174,6 +174,7 @@ def load_summaries(directory):
     return [{"file": file, "content": content, "summary": summary} for file, content, summary in summaries]
 
 def get_openai_client():
+    print("Creating OpenAI client")
     client = OpenAI(
         api_key=dotenv_values(".env")["OPENAI_API_KEY"]
     )

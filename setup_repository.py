@@ -167,6 +167,9 @@ def init_project(directory, analyze_fn, args):
     
     if args.analyse:
         print("Analyzing directory...")
+        if analyze_fn is None:
+            print("Analysis function not specified for this project.")
+            return
         import_graph = analyze_fn(directory)
         print("Analyzing directory done.")
         print("Storing analysis results...")
