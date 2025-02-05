@@ -197,7 +197,6 @@ def get_summary(query, similar_files, directory):
     query = TEMPLATE.format(requirement=query, files="\n\n".join([f"{file}:\n {summary}" for file, summary in summaries.items()]))
     return get_llm_query_result(query)
 
-
 def query_project(directory, args):
     # find similar files
     print("Generating similarity query...")
