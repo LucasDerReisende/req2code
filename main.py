@@ -14,7 +14,8 @@ def main():
         "jitsi_media": ("/Users/lucas/Downloads/jitsi-meet-master/react/features/base/media/components", analyze_js_directory),
         "jitsi": ("/Users/lucas/Downloads/jitsi-meet-master", analyze_js_directory),
         "jitsi_react": ("/Users/lucas/Downloads/jitsi-meet-master/react", analyze_js_directory),
-        "newsscraper": ("../../NewsPolitics/newsscraper", analyze_py_directory)
+        "newsscraper": ("../../NewsPolitics/newsscraper", analyze_py_directory),
+        "cula": ("data/cula", None),
     }
     
     parser = argparse.ArgumentParser()

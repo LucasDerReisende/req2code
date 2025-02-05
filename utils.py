@@ -191,6 +191,7 @@ def get_file_summaries_dict(directory, files):
     return summaries
 
 def get_openai_client():
+    print("Creating OpenAI client")
     client = OpenAI(
         api_key=dotenv_values(".env")["OPENAI_API_KEY"]
     )
