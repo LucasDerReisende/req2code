@@ -175,6 +175,7 @@ The system leverages **LLM-based processing** at multiple decision points to imp
 
 The integration of LLMs ensures **context-aware file retrieval**, surpassing traditional **keyword-matching approaches** by embedding files in a **semantic space** that better aligns with software development needs.
 
+![](./Architecture.png)
 ---
 
 ## 4. User Interaction and Functional Capabilities
