@@ -2,9 +2,11 @@ import json
 import sqlite3
 import os
 from langchain_chroma import Chroma
+from tiktoken import get_encoding
 
+from setup_repository import CALC_EMBEDDING_TOKENS
 from utils import get_embeddings, get_store_dir_from_repository, get_llm_query_result, load_call_analysis_results, \
-    get_file_summaries_dict
+    get_file_summaries_dict, set_embedding_tokens, get_embedding_tokens, get_model_encoding_string
 
 
 def similar_files_vector_db(query, directory):
@@ -19,6 +21,11 @@ def similar_files_vector_db(query, directory):
 
     similar_documents_summaries = vector_store_summaries.similarity_search(query, k=10)
     similar_documents_contents = vector_store_contents.similarity_search(query, k=10)
+
+    if CALC_EMBEDDING_TOKENS:
+        encoding = get_encoding(get_model_encoding_string())
+        token_count = len(encoding.encode(query))
+        set_embedding_tokens(get_embedding_tokens() + 2 * token_count)
 
     similar_files_summaries = [document.metadata["file"] for document in similar_documents_summaries]
     similar_files_contents = [document.metadata["file"] for document in similar_documents_contents]
@@ -55,12 +62,12 @@ def get_relevant_files(requirement, file_list, directory):
 
         files.append(f"{file}: {content}")
 
-
     cursor.close()
     conn.close()
 
     query = TEMPLATE.format(requirement=requirement, files="\n".join(files))
     return get_llm_query_result(query)
+
 
 def query_stats(directory, args):
     store_dir = get_store_dir_from_repository(directory)
@@ -104,10 +111,17 @@ def reformulate_query_for_retrieval(query):
     return get_llm_query_result(TEMPLATE.format(query=query))
 
 
+def get_file_summaries_string(file, summary_list):
+    def get_joined_summary_string(summaries):
+        return "\n".join([summary for summary in summaries])
+
+    return f"Filename {file}:\n {'Summaries' if len(summary_list) > 1 else 'Summary'} {get_joined_summary_string(summary_list)}"
+
+
 def filter_similar_files_by_summary(query, similar_files, directory):
     TEMPLATE = """
     You are given a requirement for a software project and a list of files that are similar to the requirement.
-    For each file, you are given a summary of the file content.
+    For each file, you are given a summary or multiple summaries of the file content.
     Please filter the list of files to remove files that do not have anything to do with the requirement.
     Do not hallucinate file names!
     Return only a list of the relevant files in JSON format. [<"File 1 Name">, <"File 2 Name">, ... <"File N Name">]
@@ -121,7 +135,9 @@ def filter_similar_files_by_summary(query, similar_files, directory):
 
     summaries = get_file_summaries_dict(directory, similar_files)
 
-    query = TEMPLATE.format(requirement=query, files="\n\n".join([f"{file}:\n {summary}" for file, summary in summaries.items()]))
+    query = TEMPLATE.format(requirement=query, files="\n\n".join(
+        [get_file_summaries_string(file, summary_list)
+         for file, summary_list in summaries.items()]))
 
     result = get_llm_query_result(query)
     try:
@@ -148,11 +164,13 @@ def find_missing_files(query, similar_files, directory):
 
     summaries = get_file_summaries_dict(directory, similar_files)
 
-    search_string = get_llm_query_result(TEMPLATE.format(requirement=query, files="\n\n".join([f"{file}:\n {summary}" for file, summary in summaries.items()])))
+    search_string = get_llm_query_result(TEMPLATE.format(requirement=query, files="\n\n".join(
+        [get_file_summaries_string(file, summary_list) for file, summary_list in summaries.items()])))
 
     return similar_files_vector_db(search_string, directory)
 
-def get_summary(query, similar_files, directory):
+
+def get_final_summary(query, similar_files, directory):
     TEMPLATE = """
     You are given a requirement for a software project and a list of files with their summaries that are similar to the requirement.
     A user needs to implement this requirement and through preprocessing we selected a list of files that could be relevant.
@@ -174,6 +192,8 @@ def get_summary(query, similar_files, directory):
     Do not hallucinate steps that are not related to the relevant files!
     Be very concise in the steps!
     Do not make up steps that are unrelated to the given files!
+    Do not leave out files that could be relevant!
+    Also not only look at the requirement, but also what else needs to be adapted to keep the code consistent.
     
     **Files to be changed**
     *List of files that need to be changed in a markdown list*
@@ -192,12 +212,32 @@ def get_summary(query, similar_files, directory):
     {files}
     """
 
+
+    TEMPLATE = """
+    Imagine you are helping a Junior Software Engineer with the following feature request. Please write:
+      - a summary of the implementation,
+      - a step by step breakdown of what has to be done including paths to the relevant files, what has to be done and a hint to the affected line of code if applicable;
+      - an estimation of how long it will take to finish the work on this feature request.
+    Please do not generate any code. Be concise.
+
+    Feature Request:
+    {requirement}
+
+    Similar files:
+    {files}
+    """
+
     summaries = get_file_summaries_dict(directory, similar_files)
 
-    query = TEMPLATE.format(requirement=query, files="\n\n".join([f"{file}:\n {summary}" for file, summary in summaries.items()]))
+    query = TEMPLATE.format(requirement=query,
+                            files="\n\n".join([get_file_summaries_string(file, summary_list) for file, summary_list in
+                                               summaries.items()]))
     return get_llm_query_result(query)
 
+
 def query_project(directory, args):
+    VERBOSE = False
+
     # find similar files
     print("Generating similarity query...")
     reformulated_query = reformulate_query_for_retrieval(args.query)
@@ -205,7 +245,6 @@ def query_project(directory, args):
     print('Finding similar files...')
     similar_files = set(similar_files_vector_db(reformulated_query, directory))
     print('Finding similar files done')
-
 
     if args.adjacent:
         # find and add adjacent files
@@ -219,6 +258,8 @@ def query_project(directory, args):
                 for calling_file in file['called_by']:
                     adjacent_files.add(calling_file)
         similar_files = similar_files.union(adjacent_files)
+        if VERBOSE:
+            print('Adjacent files:', adjacent_files)
         print('Finding adjacent files done')
 
     if args.find_missing:
@@ -237,15 +278,18 @@ def query_project(directory, args):
     relevant_files = get_relevant_files(args.query, list(similar_files), directory)
     print('Getting relevant files done')
 
-    print('Relevant files:', relevant_files)
-    
+    if VERBOSE:
+        print('Relevant files:', relevant_files)
+
     try:
         result = json.loads(relevant_files.replace('```json\n', '').replace('```', ''))
-        print('Relevant files:', result)
+        if VERBOSE:
+            print('Relevant files:', result)
     except Exception as e:
         print(f"Error parsing relevant files: {e}")
         return
 
     print('Generating summary...')
-    summary = get_summary(args.query, result, directory)
-    print('Summary:\n', summary)
+    summary = get_final_summary(args.query, result, directory)
+    if VERBOSE:
+        print('Summary:\n', summary)

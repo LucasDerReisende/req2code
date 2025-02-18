@@ -12,22 +12,30 @@ from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 
 from tenacity import retry, stop_after_attempt, retry_if_exception_type
 
-total_input_tokes = 0
-total_output_tokes = 0
+total_input_tokens = 0
+total_output_tokens = 0
+total_embedding_tokens = 0
 
 def get_input_tokens():
-    return total_input_tokes
+    return total_input_tokens
 
 def get_output_tokens():
-    return total_output_tokes
+    return total_output_tokens
+
+def get_embedding_tokens():
+    return total_embedding_tokens
 
 def set_input_tokens(value):
-    global total_input_tokes
-    total_input_tokes = value
+    global total_input_tokens
+    total_input_tokens = value
 
 def set_output_tokens(value):
-    global total_output_tokes
-    total_output_tokes = value
+    global total_output_tokens
+    total_output_tokens = value
+
+def set_embedding_tokens(value):
+    global total_embedding_tokens
+    total_embedding_tokens = value
 
 def is_binary_file(filename):
     """
@@ -50,7 +58,7 @@ def is_binary_file(filename):
     mime_type, encoding = mimetypes.guess_type(filename)
     if mime_type is not None:
         # Check if the MIME type suggests binary content
-        if any(mime_type.startswith(prefix) for prefix in ['image/', 'video/', 'audio/', 'application/']):
+        if any(mime_type.startswith(prefix) for prefix in ['image/', 'video/', 'audio/', 'application/']) and mime_type != 'application/json':
             return True
 
     # Read the file to look for binary content
@@ -66,6 +74,46 @@ def is_binary_file(filename):
         return False
 
     return False
+
+def get_initial_files(directory):
+    blacklist = ['node_modules', '\.(.*)$', '__pycache__', '(.*)\.lock', 'package-lock.json']
+    file_list = []
+    for root, dirs, files in os.walk(directory, topdown=True):
+        # Skip directories that match the blacklist
+        dirs[:] = [d for d in dirs if re.match('|'.join(blacklist), d) is None]
+        files[:] = [f for f in files if re.match('|'.join(blacklist), f) is None]
+        for file in files:
+            relative_path = os.path.join(os.path.relpath(root, directory), file)
+            full_path = os.path.join(root, file)
+
+            result = {
+                "file": relative_path,
+                "content": "",
+                "calls": [],
+                "called_by": []
+            }
+            with open(full_path, "r") as f:
+                try:
+                    if is_binary_file(full_path):
+                        continue
+
+                    result['content'] = f.read()
+                except UnicodeDecodeError:
+                    pass
+            file_list.append(result)
+    return file_list
+
+def join_file_lists(files1, files2):
+    result = []
+    files1_dict = {file['file']: file for file in files1}
+    files2_dict = {file['file']: file for file in files2}
+    for file_name in set(files1_dict.keys()).union(files2_dict.keys()):
+        if file_name in files1_dict:
+            result.append(files1_dict[file_name])
+        else:
+            result.append(files2_dict[file_name])
+    return result
+
 
 def store_call_analysis_results(repo_dir, files):
     store_dir = get_store_dir_from_repository(repo_dir)
@@ -168,13 +216,14 @@ def store_summaries(files, directory):
     conn.commit()
     
     for result in files:
-        try:
-            cursor.execute(
-                "INSERT OR IGNORE INTO summaries (file, content, summary) VALUES (?, ?, ?)",
-                (result["file"], result["content"], result["summary"])
-            )
-        except sqlite3.Error as e:
-            print(f"Error inserting {result['file']}: {e}")
+        for summary in result['summaries']:
+            try:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO summaries (file, content, summary) VALUES (?, ?, ?)",
+                    (result["file"], result["content"], summary)
+                )
+            except sqlite3.Error as e:
+                print(f"Error inserting {result['file']}: {e}")
 
     conn.commit()
 
@@ -186,8 +235,18 @@ def load_summaries(directory):
     cursor.execute("SELECT file, content, summary FROM summaries")
     
     summaries = cursor.fetchall()
-    
-    return [{"file": file, "content": content, "summary": summary} for file, content, summary in summaries]
+
+    result = {}
+    for file, content, summary in summaries:
+        if file in result:
+            result[file]["summaries"].append(summary)
+        else:
+            result[file] = {
+                "file": file,
+                "content": content,
+                "summaries": [summary]
+            }
+    return list(result.values())
 
 def get_file_summaries_dict(directory, files):
     store_dir = get_store_dir_from_repository(directory)
@@ -197,9 +256,11 @@ def get_file_summaries_dict(directory, files):
     summaries = {}
     for file in files:
         cursor.execute("SELECT summary FROM summaries WHERE file=?", (file,))
-        summary = cursor.fetchone()
-        if summary:
-            summaries[file] = summary[0]
+        summary_list = cursor.fetchall()
+        if not summary_list:
+            continue
+        summary_list = [summary[0] for summary in summary_list]
+        summaries[file] = summary_list
 
     cursor.close()
     conn.close()
@@ -207,7 +268,6 @@ def get_file_summaries_dict(directory, files):
     return summaries
 
 def get_openai_client():
-    print("Creating OpenAI client")
     client = OpenAI(
         api_key=dotenv_values(".env")["OPENAI_API_KEY"]
     )
@@ -258,7 +318,8 @@ def get_openai_query_result(query):
                 "role": "user",
                 "content": query,
             }
-        ]
+        ],
+        temperature=0.1,
     )
     set_input_tokens(get_input_tokens() + response.usage.prompt_tokens)
     set_output_tokens(get_output_tokens() + response.usage.completion_tokens)
@@ -300,6 +361,9 @@ def get_local_llm_query_result(query):
         ]
     )
     return response["message"]["content"]
+
+def get_model_encoding_string():
+    return "cl100k_base"
 
 def get_embeddings():
     return get_openai_embeddings()
